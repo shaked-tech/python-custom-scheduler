@@ -56,9 +56,20 @@ spec:
         app: custom-scheduler
     spec:
       serviceAccountName: custom-scheduler-sa
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
       containers:
       - name: custom-scheduler
-        image: custom-scheduler:0.0.2
+        image: custom-scheduler:0.1.3
         imagePullPolicy: Never
         env:
           - name: LOG_LEVEL

@@ -5,8 +5,9 @@ import random
 import json
 import logging
 import os
+import asyncio 
 
-from kubernetes import client, config, watch
+from kubernetes_asyncio import client, config, watch
 
 # --- Configuration ---
 # Determine log level from environment variable, default to INFO
@@ -14,12 +15,14 @@ log_level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_name, logging.INFO)
 logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# config.load_kube_config() # Use kubeconfig when running locally
-config.load_incluster_config() # Use service account token when running in cluster
-
-v1 = client.CoreV1Api()
+# Global variable for the API client, will be initialized in main
+v1 = None
 scheduler_name = "custom-scheduler"
-default_priority = 0
+
+# Lock to prevent concurrent scheduling cycles
+scheduling_lock = asyncio.Lock()
+# Event to signal that scheduling might be needed
+schedule_needed_event = asyncio.Event()
 
 # --- Helper Functions ---
 
@@ -41,21 +44,28 @@ def get_pod_priority(pod):
         logging.warning(f"Pod {pod.metadata.namespace}/{pod.metadata.name}: Invalid priority annotation value '{priority_str}'. Assigning lowest priority (-1).")
         return -1
 
-def nodes_available():
+async def nodes_available(): 
+    """Returns a list of names of available (Ready) nodes."""
+    global v1
     ready_nodes = []
     try:
-        for n in v1.list_node().items:
+        node_list = await v1.list_node()
+        for n in node_list.items:
+            if n.spec.unschedulable:
+                continue # Skip unschedulable nodes
             for status in n.status.conditions:
                 if status.type == "Ready" and status.status == "True":
-                    if n.spec.unschedulable is not True:
-                        ready_nodes.append(n.metadata.name)
+                    ready_nodes.append(n.metadata.name)
                     break
-    except client.rest.ApiException as e:
+    except client.ApiException as e:
         logging.error(f"Error listing nodes: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error listing nodes: {e}")
     return ready_nodes
 
-def schedule_pod(pod_name, node_name, namespace):
+async def schedule_pod(pod_name, node_name, namespace): 
     """Creates a binding for the pod to the node."""
+    global v1
     target = client.V1ObjectReference(
         kind="Node",
         api_version="v1",
@@ -70,14 +80,14 @@ def schedule_pod(pod_name, node_name, namespace):
     )
     try:
         logging.info(f"Attempting to bind pod '{namespace}/{pod_name}' to node '{node_name}'")
-        v1.create_namespaced_binding(namespace=namespace, body=body, _preload_content=False)
+        await v1.create_namespaced_binding(namespace=namespace, body=body, _preload_content=False)
         logging.info(f"Successfully bound pod '{namespace}/{pod_name}' to node '{node_name}'")
         return True
-    except client.rest.ApiException as e:
+    except client.ApiException as e:
         error_body = {}
         try:
-            error_body = json.loads(e.body)
-        except json.JSONDecodeError:
+            error_body = json.loads(e.body.decode('utf-8') if isinstance(e.body, bytes) else e.body)
+        except (json.JSONDecodeError, AttributeError):
             pass
 
         if e.status == 409:
@@ -91,69 +101,218 @@ def schedule_pod(pod_name, node_name, namespace):
         logging.error(f"Unexpected error scheduling pod '{namespace}/{pod_name}': {e}")
         return False
 
-
-def attempt_scheduling_cycle():
-    logging.debug("Starting scheduling cycle.")
-    available_nodes = nodes_available()
+async def attempt_scheduling_cycle():
+    """
+    Fetches pending pods, sorts by priority, and attempts to schedule multiple pods concurrently,
+    up to the number of available nodes.
+    Returns True if schedulable pods were found, False otherwise.
+    """
+    global v1
+    logging.debug("Attempting scheduling cycle.")
+    available_nodes = await nodes_available()
     if not available_nodes:
         logging.warning("No nodes available for scheduling.")
-        return
+        return False
 
     try:
-        pod_list = v1.list_pod_for_all_namespaces(field_selector="status.phase=Pending")
-    except client.rest.ApiException as e:
+        pod_list = await v1.list_pod_for_all_namespaces(field_selector="status.phase=Pending")
+    except client.ApiException as e:
         logging.error(f"Error listing pods: {e}")
-        return
+        return False
+    except Exception as e:
+        logging.error(f"Unexpected error listing pods: {e}")
+        return False
 
     schedulable_pods = []
     for pod in pod_list.items:
-        if pod.spec.scheduler_name == scheduler_name and not pod.spec.node_name:
-            priority = get_pod_priority(pod)
-            schedulable_pods.append((priority, pod))
+        if pod.spec and pod.spec.scheduler_name == scheduler_name and not pod.spec.node_name:
+            schedulable_pods.append(pod)
 
     if not schedulable_pods:
         logging.debug("No pending pods found for this scheduler.")
+        return False
+
+    schedulable_pods.sort(key=lambda p: (get_pod_priority(p), -p.metadata.creation_timestamp.timestamp()), reverse=True)
+
+    logging.info(f"Found {len(schedulable_pods)} pending pods and {len(available_nodes)} available nodes.")
+
+    # --- Concurrent Scheduling Logic --- 
+    tasks_to_run = []
+    nodes_assigned_this_cycle = set()
+    # Shuffle nodes to distribute pods somewhat randomly if priorities are equal
+    random.shuffle(available_nodes)
+    node_iter = iter(available_nodes)
+
+    for pod_to_schedule in schedulable_pods:
+        if len(nodes_assigned_this_cycle) >= len(available_nodes):
+            logging.debug("All available nodes assigned in this cycle.")
+            break # Stop if we've assigned all available nodes
+
+        selected_node = next(node_iter, None)
+        if selected_node:
+            priority = get_pod_priority(pod_to_schedule)
+            pod_name = pod_to_schedule.metadata.name
+            pod_namespace = pod_to_schedule.metadata.namespace
+            logging.info(f"  -> Preparing to schedule {pod_namespace}/{pod_name} (Prio: {priority}) to node {selected_node}")
+            # Add task to schedule this pod
+            tasks_to_run.append(schedule_pod(pod_name, selected_node, pod_namespace))
+            nodes_assigned_this_cycle.add(selected_node)
+        else:
+            # Should not happen if len(nodes_assigned_this_cycle) < len(available_nodes)
+            logging.warning("Ran out of nodes unexpectedly.")
+            break
+
+    if tasks_to_run:
+        logging.info(f"Attempting to concurrently schedule {len(tasks_to_run)} pods...")
+        # Run scheduling tasks concurrently
+        results = await asyncio.gather(*tasks_to_run, return_exceptions=True)
+
+        # Log results (optional: check for exceptions/failures in results)
+        successful_schedules = 0
+        for i, result in enumerate(results):
+            # Basic check if result is True (success from schedule_pod)
+            if result is True:
+                successful_schedules += 1
+            elif isinstance(result, Exception):
+                logging.error(f"  -> Error in scheduling task {i}: {result}")
+            else:
+                 # schedule_pod returned False or something unexpected
+                 logging.warning(f"  -> Scheduling task {i} did not complete successfully (result: {result})")
+        logging.info(f"Concurrent scheduling finished. Successfully scheduled {successful_schedules}/{len(tasks_to_run)} pods prepared in this cycle.")
+    else:
+        logging.debug("No pods were prepared for scheduling in this cycle.")
+
+    return True # Schedulable pods were found (even if scheduling failed for some)
+
+async def trigger_scheduling_cycle(): # New function to handle locking
+    """Acquires the lock and runs the scheduling cycle. Prevents concurrent runs.
+    Returns the result of attempt_scheduling_cycle (True if pods were found, False otherwise).
+    """
+    if scheduling_lock.locked():
+        logging.debug("Scheduling cycle already in progress, skipping trigger.")
+        return False # Indicate no new cycle was started
+
+    async with scheduling_lock:
+        logging.debug("Acquired scheduling lock.")
+        result = False
+        try:
+            result = await attempt_scheduling_cycle()
+        except Exception as e:
+            logging.exception("Error during attempt_scheduling_cycle")
+            result = False # Indicate potential failure/no success
+        finally:
+            logging.debug("Released scheduling lock.")
+        return result
+
+async def watch_pods(): # New function for dedicated watching
+    """Watches for pending pods and sets the schedule_needed_event."""
+    global v1
+    w = watch.Watch()
+    logging.info("Starting pod watcher...")
+    while True:
+        try:
+            async for event in w.stream(v1.list_pod_for_all_namespaces):
+                event_type = event['type']
+                pod = event['object']
+
+                if not hasattr(pod, 'spec') or not hasattr(pod, 'status') or not hasattr(pod, 'metadata'):
+                    logging.debug(f"Watcher: Received non-pod event or incomplete pod object: {event_type}")
+                    continue
+
+                logging.debug(f"Watcher: Received event: {event_type} for pod {pod.metadata.namespace}/{pod.metadata.name}, phase: {pod.status.phase}, scheduler: {pod.spec.scheduler_name}")
+
+                # If a relevant pod is pending, signal the scheduler loop
+                if pod.status.phase == "Pending" and pod.spec.scheduler_name == scheduler_name and not pod.spec.node_name:
+                    logging.info(f"Watcher: Pending pod {pod.metadata.namespace}/{pod.metadata.name} detected. Signaling scheduler.")
+                    schedule_needed_event.set() # Set the event
+
+        except client.ApiException as e:
+            if e.status == 410: # Gone
+                logging.warning("Watcher: Stream closed (410 Gone), restarting...")
+            else:
+                logging.error(f"Watcher: API Error in stream: {e}. Restarting watch...")
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            logging.info("Watcher: Task cancelled.")
+            break
+        except Exception as e:
+            logging.exception(f"Watcher: Unexpected error in stream: {e}. Restarting watch...")
+            await asyncio.sleep(5)
+    logging.info("Pod watcher finished.")
+
+async def run_scheduler_loop(): # New function for dedicated scheduling
+    """Runs the scheduling cycle whenever signaled by the event."""
+    logging.info("Starting scheduler loop...")
+    while True:
+        try:
+            await schedule_needed_event.wait() # Wait until the event is set
+            schedule_needed_event.clear() # Clear the event immediately
+            logging.info("Scheduler loop: Event received, entering active scheduling phase.")
+            while True: # Inner loop: keep running cycles as long as work is done
+                logging.debug("Scheduler loop: Running a scheduling cycle attempt.")
+                # Run the existing trigger function which handles locking and the cycle
+                work_done = await trigger_scheduling_cycle()
+                if not work_done:
+                    logging.debug("Scheduler loop: No schedulable pods found in last cycle. Pausing.")
+                    break # Exit inner loop if no work was done
+                else:
+                    logging.debug("Scheduler loop: Work potentially done in last cycle. Re-checking immediately.")
+                    await asyncio.sleep(0.1) # Small delay before next check in inner loop
+
+            logging.info("Scheduler loop: Paused, waiting for next event.")
+        except asyncio.CancelledError:
+            logging.info("Scheduler loop: Task cancelled.")
+            break
+        except Exception as e:
+            # Catch errors within the scheduling loop itself
+            logging.exception(f"Scheduler loop: Error during scheduling cycle execution: {e}")
+            # Add a delay before trying again to avoid overwhelming logs/retries
+            await asyncio.sleep(5)
+    logging.info("Scheduler loop finished.")
+
+
+# --- Main Entry Point ---
+async def main():
+    global v1
+    logging.info(f"Initializing Kubernetes client...")
+    try:
+        config.load_incluster_config()
+        v1 = client.CoreV1Api()
+    except config.ConfigException as e:
+        logging.error(f"Could not configure Kubernetes client: {e}")
+        return
+    except Exception as e:
+        logging.error(f"Unexpected error during client initialization: {e}")
         return
 
-    schedulable_pods.sort(key=lambda x: (x[0], -x[1].metadata.creation_timestamp.timestamp()), reverse=True)
+    logging.info(f"Starting custom scheduler '{scheduler_name}'...")
 
-    logging.info(f"Found {len(schedulable_pods)} pending pods for scheduling across all namespaces. Highest priority: {schedulable_pods[0][0]}")
-    logging.debug(f"Pending pods sorted by priority: {[f'{p[1].metadata.namespace}/{p[1].metadata.name}' for p in schedulable_pods]}")
+    # Create tasks for the watcher and the scheduler loop
+    watcher_task = asyncio.create_task(watch_pods())
+    scheduler_task = asyncio.create_task(run_scheduler_loop())
 
-    priority_to_schedule, pod_to_schedule = schedulable_pods[0]
-    pod_name = pod_to_schedule.metadata.name
-    pod_namespace = pod_to_schedule.metadata.namespace
+    # Wait for tasks to complete (e.g., on cancellation)
+    # Use gather to wait for both and handle potential exceptions
+    done, pending = await asyncio.wait(
+        [watcher_task, scheduler_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
 
-    selected_node = random.choice(available_nodes)
-    logging.info(f"Selected node '{selected_node}' for pod '{pod_namespace}/{pod_name}' (priority {priority_to_schedule})")
+    # If one task finishes (e.g., due to unhandled error), cancel the other
+    for task in pending:
+        task.cancel()
 
-    schedule_pod(pod_name, selected_node, pod_namespace)
+    # Wait for pending tasks to finish cancellation
+    await asyncio.gather(*pending, return_exceptions=True)
 
-
-# --- Main Loop ---
-def main():
-    logging.info(f"Starting custom scheduler '{scheduler_name}' watching all namespaces...")
-    w = watch.Watch()
-    stream = w.stream(v1.list_pod_for_all_namespaces)
-
-    for event in stream:
-        event_type = event['type']
-        pod = event['object']
-
-        if not hasattr(pod, 'spec') or not hasattr(pod, 'status'):
-            logging.debug(f"Received non-pod event or incomplete pod object: {event_type}")
-            continue
-
-        logging.debug(f"Received event: {event_type} for pod {pod.metadata.namespace}/{pod.metadata.name}, phase: {pod.status.phase}, scheduler: {pod.spec.scheduler_name}")
-
-        if pod.status.phase == "Pending" and pod.spec.scheduler_name == scheduler_name and not pod.spec.node_name:
-            logging.info(f"Pending pod detected: {pod.metadata.namespace}/{pod.metadata.name}. Triggering scheduling cycle.")
-            attempt_scheduling_cycle()
+    logging.info("Scheduler tasks finished.")
 
 if __name__ == '__main__':
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("Scheduler stopped.")
+        logging.info("Scheduler stopped by user.")
     except Exception as e:
-        logging.exception(f"An unexpected error occurred in main loop: {e}")
+        logging.exception(f"An unexpected error occurred at the top level: {e}")
+    finally:
+        logging.info("Scheduler shutdown complete.")
