@@ -9,9 +9,12 @@ kind: ClusterRole
 metadata:
   name: custom-scheduler-role
 rules:
+- apiGroups: ["batch"] # jobs
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
 - apiGroups: [""] # Core API group
   resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["get", "list", "watch"]
@@ -69,7 +72,7 @@ spec:
           effect: "NoSchedule"
       containers:
       - name: custom-scheduler
-        image: custom-scheduler:0.2.1
+        image: custom-scheduler:0.3.24-rc
         imagePullPolicy: Never
         env:
           - name: LOG_LEVEL
