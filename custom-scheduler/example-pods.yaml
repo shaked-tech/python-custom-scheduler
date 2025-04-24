@@ -9,31 +9,40 @@ spec:
   containers:
   - name: nginx
     image: nginx
+    resources:
+      requests:
+        cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-0-p2
+#   annotations:
+#     priority: "2"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: busybox-0-p2
-  annotations:
-    priority: "2"
-spec:
-  schedulerName: custom-scheduler
-  containers:
-  - name: busybox
-    image: busybox
-    command: ["sleep", "infinity"]
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: apache-0-p3
+  name: httpd-0-p3
   annotations:
     priority: "3"
 spec:
   schedulerName: custom-scheduler
   containers:
-  - name: apache
-    image: apache
+  - name: httpd
+    image: httpd
+    resources:
+      requests:
+        cpu: 6
 ---
 apiVersion: v1
 kind: Pod
@@ -46,31 +55,40 @@ spec:
   containers:
   - name: nginx
     image: nginx
+    resources:
+      requests:
+        cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-1-p5
+#   annotations:
+#     priority: "5"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: busybox-1-p5
-  annotations:
-    priority: "5"
-spec:
-  schedulerName: custom-scheduler
-  containers:
-  - name: busybox
-    image: busybox
-    command: ["sleep", "infinity"]
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: apache-1-p6
+  name: httpd-1-p6
   annotations:
     priority: "6"
 spec:
   schedulerName: custom-scheduler
   containers:
-  - name: apache
-    image: apache
+  - name: httpd
+    image: httpd
+    resources:
+      requests:
+        cpu: 6
 ---
 apiVersion: v1
 kind: Pod
@@ -83,42 +101,190 @@ spec:
   containers:
   - name: nginx
     image: nginx
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: busybox-2-p8
-  annotations:
-    priority: "8"
-spec:
-  schedulerName: custom-scheduler
-  containers:
-  - name: busybox
-    image: busybox
-    command: ["sleep", "infinity"]
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: apache-2-p9
-  annotations:
-    priority: "9"
-spec:
-  schedulerName: custom-scheduler
-  containers:
-  - name: apache
-    image: apache
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: busybox-non-existent-scheduler
-  annotations:
-    priority: "1"
-spec:
-  schedulerName: non-existent-scheduler
-  containers:
-  - name: busybox
-    image: busybox
-    command: ["sleep", "infinity"]
----
+    resources:
+      requests:
+        cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-2-p8
+#   annotations:
+#     priority: "8"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: httpd-2-p9
+#   annotations:
+#     priority: "9"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: httpd
+#     image: httpd
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: nginx-3-p10
+#   annotations:
+#     priority: "10"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: nginx
+#     image: nginx
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: httpd-3-p11
+#   annotations:
+#     priority: "11"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: httpd
+#     image: httpd
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: nginx-4-p12
+#   annotations:
+#     priority: "12"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: nginx
+#     image: nginx
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: httpd-4-p13
+#   annotations:
+#     priority: "13"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: httpd
+#     image: httpd
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: nginx-5-p14
+#   annotations:
+#     priority: "14"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: nginx
+#     image: nginx
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-5-p15
+#   annotations:
+#     priority: "15"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: nginx-6-p16
+#   annotations:
+#     priority: "16"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: nginx
+#     image: nginx
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-6-p17
+#   annotations:
+#     priority: "17"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: nginx-7-p18
+#   annotations:
+#     priority: "18"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: nginx
+#     image: nginx
+#     resources:
+#       requests:
+#         cpu: 6
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: busybox-7-p19
+#   annotations:
+#     priority: "19"
+# spec:
+#   schedulerName: custom-scheduler
+#   containers:
+#   - name: busybox
+#     image: busybox
+#     command: ["sleep", "infinity"]
+#     resources:
+#       requests:
+#         cpu: 6

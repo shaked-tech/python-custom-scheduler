@@ -45,22 +45,57 @@ def get_pod_priority(pod):
         return -1
 
 async def nodes_available(): 
-    """Returns a list of names of available (Ready) nodes."""
+    """
+    Fetches list of nodes, filters out unschedulable ones and control plane nodes.
+    Returns a list of available node names.
+    """
     global v1
     ready_nodes = []
     try:
         node_list = await v1.list_node()
-        for n in node_list.items:
-            if n.spec.unschedulable:
-                continue # Skip unschedulable nodes
-            for status in n.status.conditions:
-                if status.type == "Ready" and status.status == "True":
-                    ready_nodes.append(n.metadata.name)
-                    break
+        for node in node_list.items:
+            # Check if node has the control-plane label
+            labels = node.metadata.labels or {}
+            is_control_plane = 'node-role.kubernetes.io/control-plane' in labels
+            if is_control_plane:
+                logging.debug(f"Node {node.metadata.name} is a control plane node, skipping.")
+                continue
+
+            # Check node conditions for readiness and scheduling status
+            is_ready = False
+            is_schedulable = True # Assume schedulable unless unschedulable taint found or Spec.unschedulable=True
+
+            if node.spec and node.spec.unschedulable:
+                is_schedulable = False
+                logging.debug(f"Node {node.metadata.name} is marked unschedulable (spec.unschedulable=True).")
+
+            # Check taints for NoSchedule effect
+            if is_schedulable and node.spec and node.spec.taints:
+                for taint in node.spec.taints:
+                    if taint.effect == 'NoSchedule':
+                        is_schedulable = False
+                        logging.debug(f"Node {node.metadata.name} has NoSchedule taint: {taint.key}={taint.value}")
+                        break # Found a NoSchedule taint, no need to check others
+
+            # Check Ready condition
+            if node.status and node.status.conditions:
+                for condition in node.status.conditions:
+                    if condition.type == 'Ready' and condition.status == 'True':
+                        is_ready = True
+                        break
+
+            if is_ready and is_schedulable:
+                ready_nodes.append(node.metadata.name)
+                logging.debug(f"Node {node.metadata.name} is Ready and Schedulable.")
+            else:
+                logging.debug(f"Node {node.metadata.name} is not suitable (Ready: {is_ready}, Schedulable: {is_schedulable}).")
+
     except client.ApiException as e:
-        logging.error(f"Error listing nodes: {e}")
+        logging.error(f"Error listing or processing nodes: {e}")
     except Exception as e:
-        logging.error(f"Unexpected error listing nodes: {e}")
+        logging.exception("Unexpected error processing nodes")
+    
+    logging.debug(f"Available nodes for scheduling: {ready_nodes}")
     return ready_nodes
 
 async def schedule_pod(pod_name, node_name, namespace): 
