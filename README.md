@@ -28,3 +28,13 @@ kind load docker-image custom-scheduler:${VERSION} --name custom-scheduler
 # update scheduler image tag in the yaml file and apply
 kubectl apply -f scheduler-deployment.yaml
 ```
+
+## Test Scheduler:
+```bash
+kubectl apply -f example-pods.yaml
+```
+
+## Cleanup:
+```bash
+kind delete cluster --name custom-scheduler
+```

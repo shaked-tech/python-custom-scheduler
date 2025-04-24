@@ -72,7 +72,7 @@ spec:
           effect: "NoSchedule"
       containers:
       - name: custom-scheduler
-        image: custom-scheduler:0.3.24-rc
+        image: custom-scheduler:stable
         imagePullPolicy: Never
         env:
           - name: LOG_LEVEL
