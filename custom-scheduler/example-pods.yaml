@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-0-p1
+  annotations:
+    priority: "1"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: nginx
+    image: nginx
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-0-p2
+  annotations:
+    priority: "2"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: busybox
+    image: busybox
+    command: ["sleep", "infinity"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apache-0-p3
+  annotations:
+    priority: "3"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: apache
+    image: apache
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-1-p4
+  annotations:
+    priority: "4"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: nginx
+    image: nginx
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-1-p5
+  annotations:
+    priority: "5"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: busybox
+    image: busybox
+    command: ["sleep", "infinity"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apache-1-p6
+  annotations:
+    priority: "6"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: apache
+    image: apache
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-2-p7
+  annotations:
+    priority: "7"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: nginx
+    image: nginx
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-2-p8
+  annotations:
+    priority: "8"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: busybox
+    image: busybox
+    command: ["sleep", "infinity"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apache-2-p9
+  annotations:
+    priority: "9"
+spec:
+  schedulerName: custom-scheduler
+  containers:
+  - name: apache
+    image: apache
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-non-existent-scheduler
+  annotations:
+    priority: "1"
+spec:
+  schedulerName: non-existent-scheduler
+  containers:
+  - name: busybox
+    image: busybox
+    command: ["sleep", "infinity"]
+---
